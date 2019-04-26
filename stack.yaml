@@ -43,6 +43,7 @@ extra-deps:
   - glib-0.13.7.0@sha256:25f62eb48d104342537dd1c724f07355d56226ca595ce6f1848415fbb7f59fa7
   - gtk2hs-buildtools-0.13.5.0@sha256:a765766c4208a3e4def319ebf280fbb9e7d0a3f28d15922db36970404fb1daee
   - hindent-5.2.7@sha256:a0a90f7cc160eeba3816e53f310e16942e68d9a09fe092d9835ea6bbbcd2cd91
+  - helm-1.0.0@sha256:d302a857ec4bfaf720ba5f2345fe2cc3df5d61d920173172ca092671340f700f
 # Override default flag values for local packages and extra-deps
 # flags: {}
 
