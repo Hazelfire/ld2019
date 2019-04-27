@@ -5,11 +5,15 @@
 module Main where
 
 import           Data.List            (find)
+import qualified Data.Map             as Map
 import           Data.Maybe           (isJust)
 import           Debug.Trace          (traceShow)
 import           Text.Printf          (printf)
 
 import           Linear.V2            (V2 (V2))
+
+import           System.Directory     (getCurrentDirectory)
+import           System.FilePath      ((</>))
 import qualified System.Random        as Rand
 
 import           Helm
@@ -50,7 +54,7 @@ data Obstacle
 
 -- | Represents the game state of the game.
 data Model = Model
-  { flapperPos   :: V2 Double
+  { playerPos    :: V2 Double
   , flapperVel   :: V2 Double
   , playerStatus :: PlayerStatus
   , obstacles    :: [Obstacle]
@@ -61,7 +65,7 @@ data Model = Model
 initial :: (Model, Cmd SDLEngine Action)
 initial =
   ( Model
-      { flapperPos = V2 0 0
+      { playerPos = V2 0 0
       , flapperVel = V2 0 0
       , playerStatus = Waiting
       , obstacles = []
@@ -74,9 +78,6 @@ initial =
 -- Note that the Y component is positive as the downwards
 -- direction in our view is the positive end of the Y-axis.
 -- The origin (0, 0) is the center of the screen.
-gravity :: V2 Double
-gravity = V2 0 7
-
 lavaHeight :: Double
 lavaHeight = 65
 
@@ -98,87 +99,8 @@ obsOffset = (obsMargin + obsWidth) * 6
 flapperDims :: V2 Double
 flapperDims = V2 50 50
 
--- | Only the obstacles the player has seen/can see.
-relevantObs :: Model -> [Obstacle]
-relevantObs Model {..} = take n obstacles
-  where
-    V2 x _ = flapperPos
-    V2 w _ = fromIntegral <$> windowDims
-    n = max 0 $ floor $ (x - obsOffset + w) / (obsMargin + obsWidth)
-
--- | Are any obstacles touching the flapper?
-touchingObs :: Model -> Bool
-touchingObs model@Model {..} = isJust $ find f $ relevantObs model
-  where
-    V2 x y = flapperPos
-    V2 w h = flapperDims
-    -- The flapper pos is centered. Turn it into a box.
-    ftx = x - w / 2
-    fty = y - h / 2
-    fbx = x + w / 2
-    fby = y + h / 2
-    -- Check if the flapper box and obs box intersect.
-    -- If so, we're dead.
-    f NoObstacle = False
-    f Obstacle {..} = max tx ftx < min bx fbx && max ty fty < min by fby
-      where
-        V2 tx ty = obsTopLeft
-        V2 bx by = obsBottomRight
-
--- | Is our flapper touching the lava at the bottom of the screen?
-inLava :: Model -> Bool
-inLava Model {..} = y + fh / 2 >= h / 2 - lavaHeight
-  where
-    V2 _ fh = flapperDims
-    V2 x y = flapperPos
-    V2 w h = fromIntegral <$> windowDims
-
--- | Should our flapper die? Only checks if they should -
--- DOES NOT transition the player status to dead.
-shouldDie :: Model -> Bool
-shouldDie model = inLava model || touchingObs model
-
 update :: Model -> Action -> (Model, Cmd SDLEngine Action)
-update model@Model {..} (Animate dt) =
-  if playerStatus == Waiting
-    then (model, Cmd.none)
-    else ( model
-             { flapperPos =
-                 if y < -hh
-                   then V2 x (-hh)
-                   else pos
-             , flapperVel = vel
-             , playerStatus =
-                 if dead
-                   then Dead
-                   else Playing
-             , timeScore = elapsed
-             , timeSpeed = speed
-             }
-         , Cmd.none)
-    -- | If the player is actually playing, increase the score.
-    -- They might be at the death screen (which is also animated).
-  where
-    elapsed =
-      if dead
-        then timeScore
-        else timeScore + dt
-    dt' = dt * 0.005
-    gravity' = gravity * V2 dt' dt'
-    -- Make the movement right faster as the player gets further across.
-    speed = logBase 10 (10 + Time.inSeconds elapsed)
-    vel =
-      if dead
-        then V2 0 1 * (flapperVel + gravity') -- No x-velocity while dead.
-        else flapperVel + gravity'
-    pos@(V2 x y) =
-      flapperPos + vel +
-      if dead
-        then V2 0 0
-        else scrollVel * V2 speed 0
-    V2 _ h = fromIntegral <$> windowDims
-    hh = h / 2
-    dead = (playerStatus == Dead) || shouldDie model
+update model@Model {..} (Animate dt) = (model, Cmd.none)
 -- | The player has clicked using their mouse.
 -- | Process the "flap" of our flapper's wings.
 update model@Model {..} Flap =
@@ -192,7 +114,7 @@ update model@Model {..} Restart =
     then (model, Cmd.none)
     else ( model
              { playerStatus = Waiting
-             , flapperPos = V2 0 0
+             , playerPos = V2 0 0
              , flapperVel = V2 0 0
              , timeScore = 0
              }
@@ -315,31 +237,24 @@ playingOverlay color Model {..} =
     status = secondsText timeScore ++ " | " ++ printf "%.2fx speed" timeSpeed
     V2 _ h = fromIntegral <$> windowDims
 
-view :: Model -> Graphics SDLEngine
-view model@Model {..} =
+view :: Map.Map String (Image SDLEngine) -> Model -> Graphics SDLEngine
+view assets model@Model {..} =
   Graphics2D $
   center (V2 (w / 2) (h / 2)) $
   collage
     [ backdrop
-    , toForm $
-      center (V2 (-x) 0) $
-      collage
-        [move flapperPos flapper, group $ map structure $ relevantObs model]
-    , lava
+    , toForm $ center (V2 (-x) 0) $ collage [move (V2 0 0) flapper]
     , overlay playerStatus model
     ]
   where
     dims@(V2 w h) = fromIntegral <$> windowDims
-    V2 x y = flapperPos
+    V2 x y = playerPos
     overlayColor = rgb 1 1 1
     overlay Waiting _     = waitingOverlay overlayColor
     overlay Dead model    = deadOverlay overlayColor model
     overlay Playing model = playingOverlay overlayColor model
-    flapper = filled (rgb 0.36 0.25 0.22) $ rect flapperDims
+    flapper = image flapperDims (assets Map.! "soul")
     backdrop = filled (rgb 0.13 0.13 0.13) $ rect dims
-    lava =
-      move (V2 0 (h / 2 - lavaHeight / 2)) $
-      filled (rgb 0.72 0.11 0.11) $ rect $ V2 w lavaHeight
     structure NoObstacle = blank
     structure Obstacle {..} =
       move (V2 ((tx + bx) / 2) ((ty + by) / 2)) $
@@ -354,11 +269,19 @@ main = do
     SDL.startupWith $
     SDL.defaultConfig
       {SDL.windowIsResizable = False, SDL.windowDimensions = windowDims}
-  run
-    engine
-    GameConfig
-      { initialFn = initial
-      , updateFn = update
-      , subscriptionsFn = subscriptions
-      , viewFn = view
-      }
+  imageDir <- (</> "assets") <$> getCurrentDirectory
+  let assetList = [("Soul.png", "soul")]
+      loadAssets' [] game loaded = game loaded
+      loadAssets' ((file, id):files) game loaded = do
+        SDL.withImage engine (imageDir </> file) $ \image ->
+          loadAssets' files game (Map.insert id image loaded)
+      loadAssets files game = loadAssets' files game Map.empty
+  loadAssets assetList $ \allAssets ->
+    run
+      engine
+      GameConfig
+        { initialFn = initial
+        , updateFn = update
+        , subscriptionsFn = subscriptions
+        , viewFn = view allAssets
+        }

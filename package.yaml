@@ -25,6 +25,8 @@ dependencies:
   - containers
   - linear
   - random
+  - filepath
+  - directory
 
 library:
   source-dirs: src
