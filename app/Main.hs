@@ -47,14 +47,6 @@ data PlayerStatus
   | Dead -- ^ The player is dead and needs to hit space to get to the waiting state.
   deriving (Eq, Ord, Show)
 
--- | Represents an obstacle the flapper can hit.
-data Obstacle
-  = NoObstacle -- ^ The obstacle exists, but it's just empty (not visible and uncollidable).
-  | Obstacle -- ^ An actually collidable obstacle.
-     { obsTopLeft     :: V2 Double
-     , obsBottomRight :: V2 Double }
-  deriving (Eq, Ord, Show)
-
 data Enemy = Enemy
   { position :: V2 Double
   }
@@ -65,7 +57,6 @@ data Model = Model
   , playerVel     :: V2 Double
   , playerStatus  :: PlayerStatus
   , keyboardState :: Map.Map String Bool
-  , obstacles     :: [Obstacle]
   , timeScore     :: Time
   , timeSpeed     :: Double
   , enemies       :: [Enemy]
@@ -77,7 +68,6 @@ initial =
       { playerPos = V2 0 0
       , playerVel = V2 0 0
       , playerStatus = Waiting
-      , obstacles = []
       , timeScore = 0
       , timeSpeed = 1
       , keyboardState =
@@ -85,32 +75,17 @@ initial =
             [("up", False), ("right", False), ("down", False), ("left", False)]
       , enemies = []
       }
-  , Cmd.execute Rand.newStdGen SetupObstacles)
+  , Cmd.none)
 
 -- | The gravity acceleration for the flapper.
 -- Note that the Y component is positive as the downwards
 -- direction in our view is the positive end of the Y-axis.
 -- The origin (0, 0) is the center of the screen.
-lavaHeight :: Double
-lavaHeight = 65
-
 speed :: Double
 speed = 0.3
 
 windowDims :: V2 Int
 windowDims = V2 800 600
-
-scrollVel :: V2 Double
-scrollVel = V2 4 0
-
-obsWidth :: Double
-obsWidth = 70
-
-obsMargin :: Double
-obsMargin = 50
-
-obsOffset :: Double
-obsOffset = (obsMargin + obsWidth) * 6
 
 flapperDims :: V2 Double
 flapperDims = V2 50 50
@@ -144,67 +119,11 @@ update model@Model {..} Restart =
              , timeScore = 0
              }
     -- Trigger a regeneration of obstacles
-         , Cmd.execute Rand.newStdGen SetupObstacles)
+         , Cmd.none)
 update model@Model {..} (KeyUp key) =
   (model {keyboardState = Map.insert key False keyboardState}, Cmd.none)
 update model@Model {..} (KeyDown key) =
   (model {keyboardState = Map.insert key True keyboardState}, Cmd.none)
--- | Initialize a list of all the obstacles in the game.
--- This works really nicely, as the list of obstacles
--- we produce is lazy and we can just keep generating
--- new obstacles out of until infinity - which is perfect,
--- as our player might just keep playing the game
--- for an eternity and beyond.
-update model (SetupObstacles rng) =
-  ( model
-      {obstacles = scanl generate NoObstacle $ zip [0 ..] $ Rand.randoms rng}
-  , Cmd.none)
-    -- | Generate an obstacle based based off the last obstacle
-    -- generated and some random input.
-  where
-    generate ::
-         Obstacle -- | The last obstacle generated (or 'NoObstacle' if first).
-      -> (Int, Double) -- | First element is the obstacle index, second is random input between [0,1).
-      -> Obstacle -- | The generated obstacle.
-    generate last (i, n)
-      -- Randomly exclude obstacles, but don't do it for the first one.
-     =
-      if i > 0 && (n < lb || n > hb)
-        then NoObstacle
-        else Obstacle
-               { obsTopLeft = V2 x y
-               , obsBottomRight = V2 (x + obsWidth) (y + height)
-               }
-      where
-        lb = 0.2
-        hb = 0.8
-        -- We have to normalize the value here as we ignored < lb and > hb above.
-        -- Let's get this back to (0, 1]
-        n' = (n - lb) / (hb - lb)
-        x = obsOffset + (obsWidth + obsMargin) * fromIntegral i
-        V2 _ h = fromIntegral <$> windowDims
-        h' = h - lavaHeight
-        hh' = h / 2
-        minHeight = 100
-        maxHeight = 300
-        (y, height) = calc last
-        -- | Calc the obstacle height and
-        calc NoObstacle
-          -- Generate a random y and random height. This can be anywhere on the screen as
-          -- we're not next to an older obstacle.
-         = (-hh' + n' * h', height')
-          where
-            height' = minHeight + (maxHeight - minHeight) * n'
-        calc Obstacle {..}
-          -- We want the obstacle being generated to be in a similar position
-          -- to the last one generated. So we adjust the last position randomly
-          -- by a portion of the last generated obstacle's height.
-         = (max (-hh') $ min hh' $ ty + (n' - 0.5) * maxHeight, height')
-          where
-            V2 tx ty = obsTopLeft
-            V2 bx by = obsBottomRight
-            lastHeight = by - ty
-            height' = min maxHeight $ lastHeight + (n' - 0.5) * minHeight
 -- | Do nothing.
 update model _ = (model, Cmd.none)
 
