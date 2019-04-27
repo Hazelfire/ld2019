@@ -115,9 +115,6 @@ obsOffset = (obsMargin + obsWidth) * 6
 flapperDims :: V2 Double
 flapperDims = V2 50 50
 
-grassDims :: V2 Double
-grassDims = V2 100 100
-
 update :: Model -> Action -> (Model, Cmd SDLEngine Action)
 update model@Model {..} (Animate dt) =
   (model {playerPos = (playerPos + (vel * (V2 dt dt)))}, Cmd.none)
@@ -281,35 +278,19 @@ playingOverlay color Model {..} =
     status = secondsText timeScore ++ " | " ++ printf "%.2fx speed" timeSpeed
     V2 _ h = fromIntegral <$> windowDims
 
-tile :: Form e -> Collage e
-tile form =
-  collage $
-  concat
-    (map
-       (\i -> (map (\j -> (move (V2 (i * 100) (j * 100)) form))) [0 .. 10])
-       [0 .. 10])
-
 view :: Map.Map String (Image SDLEngine) -> Model -> Graphics SDLEngine
 view assets model@Model {..} =
   Graphics2D $
   collage
-    [move (-playerPos) (toForm grass), move (V2 (w / 2) (h / 2)) (playerSprite assets)]
+    [ move (-playerPos) $ terrainSprite assets
+    , move (V2 (w / 2) (h / 2)) (playerSprite assets)
+    ]
   where
     dims@(V2 w h) = fromIntegral <$> windowDims
-    V2 x y = playerPos
     overlayColor = rgb 1 1 1
     overlay Waiting _     = waitingOverlay overlayColor
     overlay Dead model    = deadOverlay overlayColor model
     overlay Playing model = playingOverlay overlayColor model
-    grass = tile (image grassDims (assets Map.! "grass"))
-    backdrop = filled (rgb 0.13 0.13 0.13) $ rect dims
-    structure NoObstacle = blank
-    structure Obstacle {..} =
-      move (V2 ((tx + bx) / 2) ((ty + by) / 2)) $
-      filled (rgb 0.38 0.49 0.55) $ rect $ V2 (bx - tx) (by - ty)
-      where
-        V2 tx ty = obsTopLeft
-        V2 bx by = obsBottomRight
 
 main :: IO ()
 main = do
