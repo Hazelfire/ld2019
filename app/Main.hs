@@ -29,6 +29,8 @@ import qualified Helm.Sub             as Sub
 import           Helm.Time            (Time)
 import qualified Helm.Time            as Time
 
+import           Lib.Drawing
+
 -- | Represents the game actions for our game.
 data Action
   = DoNothing -- ^ Do nothing.
@@ -290,7 +292,8 @@ tile form =
 view :: Map.Map String (Image SDLEngine) -> Model -> Graphics SDLEngine
 view assets model@Model {..} =
   Graphics2D $
-  collage [move (-playerPos) (toForm grass), move (V2 (w / 2) (h / 2)) player]
+  collage
+    [move (-playerPos) (toForm grass), move (V2 (w / 2) (h / 2)) (playerSprite assets)]
   where
     dims@(V2 w h) = fromIntegral <$> windowDims
     V2 x y = playerPos
@@ -298,7 +301,6 @@ view assets model@Model {..} =
     overlay Waiting _     = waitingOverlay overlayColor
     overlay Dead model    = deadOverlay overlayColor model
     overlay Playing model = playingOverlay overlayColor model
-    player = image flapperDims (assets Map.! "soul")
     grass = tile (image grassDims (assets Map.! "grass"))
     backdrop = filled (rgb 0.13 0.13 0.13) $ rect dims
     structure NoObstacle = blank
