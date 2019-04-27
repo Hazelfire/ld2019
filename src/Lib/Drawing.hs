@@ -1,8 +1,10 @@
 module Lib.Drawing
   ( playerSprite
   , terrainSprite
+  , moveTerrain
   ) where
 
+import           Data.Fixed
 import qualified Data.Map        as Map
 import           Helm
 import           Helm.Engine.SDL (SDLEngine)
@@ -28,3 +30,10 @@ playerSprite assets = image playerDims (assets Map.! "soul")
 
 terrainSprite :: Map.Map String (Image SDLEngine) -> Form SDLEngine
 terrainSprite assets = toForm $ tile $ image grassDims $ assets Map.! "grass"
+
+moveTerrain :: V2 Double -> Form SDLEngine -> Form SDLEngine
+moveTerrain playerPos terrain =
+  move ((\x -> (mod' (-x) grassX) - grassX) <$> playerPos) terrain
+  where
+    V2 x y = playerPos
+    V2 grassX grassY = grassDims

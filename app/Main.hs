@@ -282,7 +282,7 @@ view :: Map.Map String (Image SDLEngine) -> Model -> Graphics SDLEngine
 view assets model@Model {..} =
   Graphics2D $
   collage
-    [ move (-playerPos) $ terrainSprite assets
+    [ moveTerrain playerPos $ terrainSprite assets
     , move (V2 (w / 2) (h / 2)) (playerSprite assets)
     ]
   where
