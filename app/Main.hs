@@ -33,7 +33,8 @@ import qualified Helm.Time            as Time
 data Action
   = DoNothing -- ^ Do nothing.
   | Animate Double -- ^ Animate the player with a dt.
-  | Flap -- ^ Flap the player.
+  | KeyDown String
+  | KeyUp String
   | Restart -- ^ Restart the game after dying.
   | SetupObstacles Rand.StdGen -- ^ Setup the obstacles using an RNG.
 
@@ -52,25 +53,35 @@ data Obstacle
      , obsBottomRight :: V2 Double }
   deriving (Eq, Ord, Show)
 
+data Enemy = Enemy
+  { position :: V2 Double
+  }
+
 -- | Represents the game state of the game.
 data Model = Model
-  { playerPos    :: V2 Double
-  , flapperVel   :: V2 Double
-  , playerStatus :: PlayerStatus
-  , obstacles    :: [Obstacle]
-  , timeScore    :: Time
-  , timeSpeed    :: Double
+  { playerPos     :: V2 Double
+  , playerVel     :: V2 Double
+  , playerStatus  :: PlayerStatus
+  , keyboardState :: Map.Map String Bool
+  , obstacles     :: [Obstacle]
+  , timeScore     :: Time
+  , timeSpeed     :: Double
+  , enemies       :: [Enemy]
   }
 
 initial :: (Model, Cmd SDLEngine Action)
 initial =
   ( Model
       { playerPos = V2 0 0
-      , flapperVel = V2 0 0
+      , playerVel = V2 0 0
       , playerStatus = Waiting
       , obstacles = []
       , timeScore = 0
       , timeSpeed = 1
+      , keyboardState =
+          Map.fromList
+            [("up", False), ("right", False), ("down", False), ("left", False)]
+      , enemies = []
       }
   , Cmd.execute Rand.newStdGen SetupObstacles)
 
@@ -80,6 +91,9 @@ initial =
 -- The origin (0, 0) is the center of the screen.
 lavaHeight :: Double
 lavaHeight = 65
+
+speed :: Double
+speed = 0.3
 
 windowDims :: V2 Int
 windowDims = V2 800 600
@@ -99,14 +113,26 @@ obsOffset = (obsMargin + obsWidth) * 6
 flapperDims :: V2 Double
 flapperDims = V2 50 50
 
+grassDims :: V2 Double
+grassDims = V2 100 100
+
 update :: Model -> Action -> (Model, Cmd SDLEngine Action)
-update model@Model {..} (Animate dt) = (model, Cmd.none)
--- | The player has clicked using their mouse.
--- | Process the "flap" of our flapper's wings.
-update model@Model {..} Flap =
-  if playerStatus == Dead
-    then (model, Cmd.none)
-    else (model {flapperVel = V2 0 (-17), playerStatus = Playing}, Cmd.none)
+update model@Model {..} (Animate dt) =
+  (model {playerPos = (playerPos + (vel * (V2 dt dt)))}, Cmd.none)
+  where
+    vel =
+      V2 speed speed *
+      V2
+        (if keyboardState Map.! "right"
+           then 1
+           else if keyboardState Map.! "left"
+                  then -1
+                  else 0)
+        (if keyboardState Map.! "down"
+           then 1
+           else if keyboardState Map.! "up"
+                  then -1
+                  else 0)
 -- | The player has pressed space while on the death screen.
 -- Restart the game.
 update model@Model {..} Restart =
@@ -115,11 +141,15 @@ update model@Model {..} Restart =
     else ( model
              { playerStatus = Waiting
              , playerPos = V2 0 0
-             , flapperVel = V2 0 0
+             , playerVel = V2 0 0
              , timeScore = 0
              }
     -- Trigger a regeneration of obstacles
          , Cmd.execute Rand.newStdGen SetupObstacles)
+update model@Model {..} (KeyUp key) =
+  (model {keyboardState = Map.insert key False keyboardState}, Cmd.none)
+update model@Model {..} (KeyDown key) =
+  (model {keyboardState = Map.insert key True keyboardState}, Cmd.none)
 -- | Initialize a list of all the obstacles in the game.
 -- This works really nicely, as the list of obstacles
 -- we produce is lazy and we can just keep generating
@@ -182,10 +212,19 @@ update model _ = (model, Cmd.none)
 subscriptions :: Sub SDLEngine Action
 subscriptions =
   Sub.batch
-    [ Mouse.clicks $ \_ _ -> Flap
-    , Keyboard.presses $ \key ->
+    [ Keyboard.downs $ \key ->
         (case key of
-           Keyboard.SpaceKey -> Restart
+           Keyboard.RightKey -> KeyDown "right"
+           Keyboard.LeftKey  -> KeyDown "left"
+           Keyboard.UpKey    -> KeyDown "up"
+           Keyboard.DownKey  -> KeyDown "down"
+           _                 -> DoNothing)
+    , Keyboard.ups $ \key ->
+        (case key of
+           Keyboard.RightKey -> KeyUp "right"
+           Keyboard.LeftKey  -> KeyUp "left"
+           Keyboard.UpKey    -> KeyUp "up"
+           Keyboard.DownKey  -> KeyUp "down"
            _                 -> DoNothing)
     , Time.fps 60 Animate
     ]
@@ -199,6 +238,9 @@ secondsText t =
     else " second"
   where
     s = round $ Time.inSeconds t
+
+enemy :: V2 Double -> Form SDLEngine
+enemy pos = move pos $ text $ Text.height 50 $ Text.toText ("Enemy")
 
 -- | The overlay displayed when the player is dead.
 deadOverlay :: Color -> Model -> Form SDLEngine
@@ -237,15 +279,18 @@ playingOverlay color Model {..} =
     status = secondsText timeScore ++ " | " ++ printf "%.2fx speed" timeSpeed
     V2 _ h = fromIntegral <$> windowDims
 
+tile :: Form e -> Collage e
+tile form =
+  collage $
+  concat
+    (map
+       (\i -> (map (\j -> (move (V2 (i * 100) (j * 100)) form))) [0 .. 10])
+       [0 .. 10])
+
 view :: Map.Map String (Image SDLEngine) -> Model -> Graphics SDLEngine
 view assets model@Model {..} =
   Graphics2D $
-  center (V2 (w / 2) (h / 2)) $
-  collage
-    [ backdrop
-    , toForm $ center (V2 (-x) 0) $ collage [move (V2 0 0) flapper]
-    , overlay playerStatus model
-    ]
+  collage [move (-playerPos) (toForm grass), move (V2 (w / 2) (h / 2)) player]
   where
     dims@(V2 w h) = fromIntegral <$> windowDims
     V2 x y = playerPos
@@ -253,7 +298,8 @@ view assets model@Model {..} =
     overlay Waiting _     = waitingOverlay overlayColor
     overlay Dead model    = deadOverlay overlayColor model
     overlay Playing model = playingOverlay overlayColor model
-    flapper = image flapperDims (assets Map.! "soul")
+    player = image flapperDims (assets Map.! "soul")
+    grass = tile (image grassDims (assets Map.! "grass"))
     backdrop = filled (rgb 0.13 0.13 0.13) $ rect dims
     structure NoObstacle = blank
     structure Obstacle {..} =
@@ -270,7 +316,7 @@ main = do
     SDL.defaultConfig
       {SDL.windowIsResizable = False, SDL.windowDimensions = windowDims}
   imageDir <- (</> "assets") <$> getCurrentDirectory
-  let assetList = [("Soul.png", "soul")]
+  let assetList = [("Soul.png", "soul"), ("grass.png", "grass")]
       loadAssets' [] game loaded = game loaded
       loadAssets' ((file, id):files) game loaded = do
         SDL.withImage engine (imageDir </> file) $ \image ->
